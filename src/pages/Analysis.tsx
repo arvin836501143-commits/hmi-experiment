@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Card,
   Tabs,
@@ -11,6 +11,7 @@ import {
   Spin,
   Alert,
   Space,
+  Select,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import G2Chart from '../components/G2Chart'
@@ -72,6 +73,9 @@ function layoutText(v: string) {
 
 function Analysis() {
   const { records, loading, error } = useExperimentData()
+
+  // 当前选中的被试索引（数据明细 Tab 用）
+  const [selectedSubject, setSelectedSubject] = useState(0)
 
   // -------- 统计派生数据 --------
   const stats = useMemo(() => {
@@ -164,13 +168,13 @@ function Analysis() {
   }, [stats])
 
   const tlxChartData = useMemo(() => {
-    const result: { layout: string; dimension: string; score: number }[] = []
+    const result: { 布局: string; 维度: string; 评分: number }[] = []
     Object.entries(stats.tlxByLayout).forEach(([layout, dims]) => {
       Object.entries(dims).forEach(([dim, values]) => {
         result.push({
-          layout: LAYOUT_LABELS_MAP[layout] ?? layout,
-          dimension: TLX_LABELS[dim] ?? dim,
-          score: Math.round(values.reduce((s, v) => s + v, 0) / values.length),
+          布局: LAYOUT_LABELS_MAP[layout] ?? layout,
+          维度: TLX_LABELS[dim] ?? dim,
+          评分: Math.round(values.reduce((s, v) => s + v, 0) / values.length),
         })
       })
     })
@@ -275,88 +279,97 @@ function Analysis() {
     return result
   }, [records])
 
-  // -------- 数据明细：展开为四个子表 --------
-  // 表1：流程一 信息采集（每位被试一行）
-  const screeningRows = useMemo(() => {
-    return records.map((r, i) => ({
-      key: `${r.id}-screen`,
-      编号: i + 1,
-      提交时间: new Date(r.created_at).toLocaleString('zh-CN'),
-      年龄: r.demographic?.age ?? '-',
-      性别: genderText(r.demographic?.gender ?? null),
-      最高学历: r.demographic?.education || '-',
-      职业类别: r.demographic?.occupation || '-',
-      是否有驾驶证: yesNoText(r.demographic?.hasLicense ?? null),
-      驾龄: r.demographic?.drivingYears || '-',
-      年均行驶里程: r.demographic?.annualMileage || '-',
-      视力状况: r.demographic?.visionStatus || '-',
-      色盲测试1答案: r.demographic?.colorBlindTest1 || '-',
-      色盲测试2答案: r.demographic?.colorBlindTest2 || '-',
-      状态: r.disqualify_reason
+  // -------- 数据明细：按被试分组展示 --------
+  // 被试选择器选项
+  const subjectOptions = useMemo(() => {
+    return records.map((r, i) => {
+      const status = r.disqualify_reason
         ? DISQUALIFY_LABELS[r.disqualify_reason] ?? '不合格'
         : r.eft && r.takeover && r.survey
           ? '已完成'
+          : '进行中'
+      return {
+        value: i,
+        label: `被试${i + 1} · ${new Date(r.created_at).toLocaleString('zh-CN')} · ${status}`,
+      }
+    })
+  }, [records])
+
+  // 选中的被试记录（防止越界）
+  const currentRecord = records[selectedSubject]
+
+  // 表1：流程一 信息采集（选中被试一行）
+  const screeningRows = useMemo(() => {
+    if (!currentRecord) return []
+    const i = selectedSubject
+    return [{
+      key: `${currentRecord.id}-screen`,
+      编号: i + 1,
+      提交时间: new Date(currentRecord.created_at).toLocaleString('zh-CN'),
+      年龄: currentRecord.demographic?.age ?? '-',
+      性别: genderText(currentRecord.demographic?.gender ?? null),
+      最高学历: currentRecord.demographic?.education || '-',
+      职业类别: currentRecord.demographic?.occupation || '-',
+      是否有驾驶证: yesNoText(currentRecord.demographic?.hasLicense ?? null),
+      驾龄: currentRecord.demographic?.drivingYears || '-',
+      年均行驶里程: currentRecord.demographic?.annualMileage || '-',
+      视力状况: currentRecord.demographic?.visionStatus || '-',
+      色盲测试1答案: currentRecord.demographic?.colorBlindTest1 || '-',
+      色盲测试2答案: currentRecord.demographic?.colorBlindTest2 || '-',
+      状态: currentRecord.disqualify_reason
+        ? DISQUALIFY_LABELS[currentRecord.disqualify_reason] ?? '不合格'
+        : currentRecord.eft && currentRecord.takeover && currentRecord.survey
+          ? '已完成'
           : '进行中',
-    }))
-  }, [records])
+    }]
+  }, [currentRecord, selectedSubject])
 
-  // 表2：流程二 图形测验逐题明细（每道题一行）
+  // 表2：流程二 图形测验逐题明细（选中被试）
   const eftRows = useMemo(() => {
-    const rows: Record<string, unknown>[] = []
-    records.forEach((r, ri) => {
-      r.eft?.results.forEach((q) => {
-        rows.push({
-          key: `${r.id}-eft-${q.questionIndex}`,
-          被试编号: ri + 1,
-          提交时间: new Date(r.created_at).toLocaleString('zh-CN'),
-          题号: q.questionIndex + 1,
-          选择的选项: q.selectedOption ?? '超时未答',
-          是否答对: q.isCorrect ? '正确' : '错误',
-          答题时间: q.responseTime !== null ? `${Math.round(q.responseTime)} ms` : '超时',
-        })
-      })
-    })
-    return rows
-  }, [records])
+    if (!currentRecord?.eft) return []
+    const ri = selectedSubject
+    return currentRecord.eft.results.map((q) => ({
+      key: `${currentRecord.id}-eft-${q.questionIndex}`,
+      被试编号: ri + 1,
+      题号: q.questionIndex + 1,
+      选择的选项: q.selectedOption ?? '超时未答',
+      是否答对: q.isCorrect ? '正确' : '错误',
+      答题时间: q.responseTime !== null ? `${Math.round(q.responseTime)} ms` : '超时',
+    }))
+  }, [currentRecord, selectedSubject])
 
-  // 表3：流程三 接管测试逐次明细（每次点击一行）
+  // 表3：流程三 接管测试逐次明细（选中被试）
   const takeoverRows = useMemo(() => {
-    const rows: Record<string, unknown>[] = []
-    records.forEach((r, ri) => {
-      r.takeover?.trials.forEach((t, ti) => {
-        rows.push({
-          key: `${r.id}-takeover-${ti}`,
-          被试编号: ri + 1,
-          提交时间: new Date(r.created_at).toLocaleString('zh-CN'),
-          试次序号: ti + 1,
-          HMI布局: layoutText(t.layout),
-          是否命中: t.hit ? '命中' : '未命中',
-          点击反应时间: `${Math.round(t.reactionTime)} ms`,
-        })
-      })
-    })
-    return rows
-  }, [records])
+    if (!currentRecord?.takeover) return []
+    const ri = selectedSubject
+    return currentRecord.takeover.trials.map((t, ti) => ({
+      key: `${currentRecord.id}-takeover-${ti}`,
+      被试编号: ri + 1,
+      试次序号: ti + 1,
+      HMI布局: layoutText(t.layout),
+      是否命中: t.hit ? '命中' : '未命中',
+      点击反应时间: `${Math.round(t.reactionTime)} ms`,
+    }))
+  }, [currentRecord, selectedSubject])
 
-  // 表4：流程四 主观调研逐题明细（每个布局每个维度一行）
+  // 表4：流程四 主观调研逐题明细（选中被试）
   const surveyRows = useMemo(() => {
+    if (!currentRecord?.survey) return []
+    const ri = selectedSubject
     const rows: Record<string, unknown>[] = []
-    records.forEach((r, ri) => {
-      r.survey?.results.forEach((sr) => {
-        Object.entries(sr.ratings).forEach(([dim, val]) => {
-          rows.push({
-            key: `${r.id}-survey-${sr.layout}-${dim}`,
-            被试编号: ri + 1,
-            提交时间: new Date(r.created_at).toLocaleString('zh-CN'),
-            HMI布局: layoutText(sr.layout),
-            评分维度: TLX_LABELS[dim] ?? dim,
-            评分: val,
-          })
+    currentRecord.survey.results.forEach((sr) => {
+      Object.entries(sr.ratings).forEach(([dim, val]) => {
+        rows.push({
+          key: `${currentRecord.id}-survey-${sr.layout}-${dim}`,
+          被试编号: ri + 1,
+          HMI布局: layoutText(sr.layout),
+          评分维度: TLX_LABELS[dim] ?? dim,
+          评分: val,
         })
       })
     })
     return rows
-  }, [records])
+  }, [currentRecord, selectedSubject])
 
   // -------- 渲染 --------
   if (loading) {
@@ -455,63 +468,84 @@ function Analysis() {
             {
               key: 'table',
               label: '数据明细',
-              children: (
-                <Tabs
-                  items={[
-                    {
-                      key: 'screening',
-                      label: '流程一：信息采集',
-                      children: (
-                        <Table
-                          size="small"
-                          columns={buildColumns(screeningRows)}
-                          dataSource={screeningRows}
-                          pagination={{ pageSize: 20, size: 'small' }}
-                          scroll={{ x: 1200 }}
-                        />
-                      ),
-                    },
-                    {
-                      key: 'eft',
-                      label: '流程二：图形测验逐题',
-                      children: (
-                        <Table
-                          size="small"
-                          columns={buildColumns(eftRows)}
-                          dataSource={eftRows}
-                          pagination={{ pageSize: 20, size: 'small' }}
-                          scroll={{ x: 600 }}
-                        />
-                      ),
-                    },
-                    {
-                      key: 'takeover',
-                      label: '流程三：接管测试逐次',
-                      children: (
-                        <Table
-                          size="small"
-                          columns={buildColumns(takeoverRows)}
-                          dataSource={takeoverRows}
-                          pagination={{ pageSize: 20, size: 'small' }}
-                          scroll={{ x: 600 }}
-                        />
-                      ),
-                    },
-                    {
-                      key: 'survey',
-                      label: '流程四：主观调研逐题',
-                      children: (
-                        <Table
-                          size="small"
-                          columns={buildColumns(surveyRows)}
-                          dataSource={surveyRows}
-                          pagination={{ pageSize: 20, size: 'small' }}
-                          scroll={{ x: 600 }}
-                        />
-                      ),
-                    },
-                  ]}
-                />
+              children: records.length === 0 ? (
+                <Empty description="暂无数据" />
+              ) : (
+                <Space direction="vertical" size="large" style={{ width: '100%' }}>
+                  {/* 被试选择器 */}
+                  <Card size="small">
+                    <Space>
+                      <Text strong>选择被试：</Text>
+                      <Select
+                        style={{ minWidth: 400 }}
+                        value={selectedSubject}
+                        options={subjectOptions}
+                        onChange={(v) => setSelectedSubject(v)}
+                        showSearch
+                        optionFilterProp="label"
+                      />
+                      <Text type="secondary">
+                        共 {records.length} 位被试
+                      </Text>
+                    </Space>
+                  </Card>
+
+                  {/* 流程一：信息采集 */}
+                  <Card size="small" title={`流程一 · 信息采集（被试${selectedSubject + 1}）`}>
+                    <Table
+                      size="small"
+                      columns={buildColumns(screeningRows)}
+                      dataSource={screeningRows}
+                      pagination={false}
+                      scroll={{ x: 1200 }}
+                    />
+                  </Card>
+
+                  {/* 流程二：图形测验逐题 */}
+                  <Card size="small" title={`流程二 · 图形测验逐题（被试${selectedSubject + 1}）`}>
+                    {eftRows.length > 0 ? (
+                      <Table
+                        size="small"
+                        columns={buildColumns(eftRows)}
+                        dataSource={eftRows}
+                        pagination={false}
+                        scroll={{ x: 600 }}
+                      />
+                    ) : (
+                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该被试未完成图形测验" />
+                    )}
+                  </Card>
+
+                  {/* 流程三：接管测试逐次 */}
+                  <Card size="small" title={`流程三 · 接管测试逐次（被试${selectedSubject + 1}）`}>
+                    {takeoverRows.length > 0 ? (
+                      <Table
+                        size="small"
+                        columns={buildColumns(takeoverRows)}
+                        dataSource={takeoverRows}
+                        pagination={false}
+                        scroll={{ x: 600 }}
+                      />
+                    ) : (
+                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该被试未完成接管测试" />
+                    )}
+                  </Card>
+
+                  {/* 流程四：主观调研逐题 */}
+                  <Card size="small" title={`流程四 · 主观调研逐题（被试${selectedSubject + 1}）`}>
+                    {surveyRows.length > 0 ? (
+                      <Table
+                        size="small"
+                        columns={buildColumns(surveyRows)}
+                        dataSource={surveyRows}
+                        pagination={false}
+                        scroll={{ x: 600 }}
+                      />
+                    ) : (
+                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="该被试未完成主观调研" />
+                    )}
+                  </Card>
+                </Space>
               ),
             },
 
@@ -727,20 +761,25 @@ function Analysis() {
                         <G2Chart
                           height={460}
                           render={(chart: Chart) => {
-                            chart
-                              .data(tlxChartData)
-                              .encode('x', 'dimension')
-                              .encode('y', 'score')
-                              .encode('color', 'layout')
-                              .encode('key', 'layout')
-                              .scale('x', { type: 'point' })
-                              .scale('y', { domain: [0, 100] })
-                              .coordinate({ type: 'polar' })
-                              .layer()
-                              .line()
-                              .label(false)
-                            chart.point().encode('x', 'dimension').encode('y', 'score').encode('color', 'layout').style({ r: 4 })
+                            chart.coordinate({ type: 'polar' })
+                            chart.scale('x', { type: 'point' })
+                            chart.scale('y', { domain: [0, 100] })
                             chart.legend('color', { position: 'bottom' })
+                            chart
+                              .line()
+                              .data(tlxChartData)
+                              .encode('x', '维度')
+                              .encode('y', '评分')
+                              .encode('color', '布局')
+                              .encode('key', '布局')
+                              .label(false)
+                            chart
+                              .point()
+                              .data(tlxChartData)
+                              .encode('x', '维度')
+                              .encode('y', '评分')
+                              .encode('color', '布局')
+                              .style({ r: 4 })
                           }}
                         />
                       </Card>
@@ -762,8 +801,7 @@ function Analysis() {
                               .encode('y', 'avgRt')
                               .encode('color', 'style')
                               .encode('shape', 'point')
-                              .encode('size', 6)
-                              .style({ fillOpacity: 0.75, stroke: '#fff', strokeOpacity: 0.3 })
+                              .style({ r: 6, fillOpacity: 0.75, stroke: '#fff', strokeOpacity: 0.3 })
                               .label({
                                 text: 'subject',
                                 position: 'top',
