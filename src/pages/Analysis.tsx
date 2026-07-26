@@ -10,12 +10,10 @@ import {
   Empty,
   Spin,
   Alert,
-  Tag,
   Space,
 } from 'antd'
 import G2Chart from '../components/G2Chart'
 import { useExperimentData, LAYOUT_LABELS_MAP } from '../lib/useExperimentData'
-import type { ExperimentRecordRow } from '../lib/useExperimentData'
 import type { Chart } from '@antv/g2'
 
 const { Title } = Typography
@@ -37,6 +35,25 @@ const TLX_LABELS: Record<string, string> = {
   frustration: '挫败感',
 }
 
+/** 性别 → 中文 */
+function genderText(v: string | null) {
+  if (v === 'male') return '男'
+  if (v === 'female') return '女'
+  return '-'
+}
+
+/** 是否 → 中文 */
+function yesNoText(v: string | null) {
+  if (v === 'yes') return '是'
+  if (v === 'no') return '否'
+  return '-'
+}
+
+/** 布局 → 中文 */
+function layoutText(v: string) {
+  return LAYOUT_LABELS_MAP[v] ?? v
+}
+
 function Analysis() {
   const { records, loading, error } = useExperimentData()
 
@@ -48,7 +65,6 @@ function Analysis() {
       (r) => r.eft && r.takeover && r.survey,
     ).length
 
-    // EFT 总分统计
     const eftRecords = records.filter((r) => r.eft)
     const avgEftScore =
       eftRecords.length > 0
@@ -56,16 +72,12 @@ function Analysis() {
           eftRecords.length
         : 0
 
-    // EFT 平均反应时
     const eftRts = eftRecords
       .filter((r) => r.eft!.avgCorrectResponseTime !== null)
       .map((r) => r.eft!.avgCorrectResponseTime!)
     const avgEftRt =
-      eftRts.length > 0
-        ? eftRts.reduce((s, v) => s + v, 0) / eftRts.length
-        : 0
+      eftRts.length > 0 ? eftRts.reduce((s, v) => s + v, 0) / eftRts.length : 0
 
-    // 接管测试反应时（按布局分组）
     const takeoverByLayout: Record<string, number[]> = {}
     records.forEach((r) => {
       r.takeover?.trials.forEach((t) => {
@@ -74,7 +86,6 @@ function Analysis() {
       })
     })
 
-    // 命中率（按布局）
     const hitRateByLayout: Record<string, { hit: number; total: number }> = {}
     records.forEach((r) => {
       r.takeover?.trials.forEach((t) => {
@@ -84,11 +95,7 @@ function Analysis() {
       })
     })
 
-    // NASA-TLX 各维度平均分（按布局）
-    const tlxByLayout: Record<
-      string,
-      Record<string, number[]>
-    > = {}
+    const tlxByLayout: Record<string, Record<string, number[]>> = {}
     records.forEach((r) => {
       r.survey?.results.forEach((sr) => {
         if (!tlxByLayout[sr.layout]) tlxByLayout[sr.layout] = {}
@@ -99,7 +106,6 @@ function Analysis() {
       })
     })
 
-    // 人口学统计
     const genderCount = { male: 0, female: 0 }
     const ageList: number[] = []
     records.forEach((r) => {
@@ -165,72 +171,88 @@ function Analysis() {
       }))
   }, [records])
 
-  // -------- 表格列 --------
-  const detailColumns = [
-    {
-      title: '编号',
-      dataIndex: 'id',
-      width: 70,
-    },
-    {
-      title: '提交时间',
-      dataIndex: 'created_at',
-      width: 180,
-      render: (v: string) => new Date(v).toLocaleString('zh-CN'),
-    },
-    {
-      title: '年龄',
-      dataIndex: ['demographic', 'age'],
-      width: 70,
-    },
-    {
-      title: '性别',
-      dataIndex: ['demographic', 'gender'],
-      width: 70,
-      render: (v: string) => (v === 'male' ? '男' : v === 'female' ? '女' : '-'),
-    },
-    {
-      title: 'EFT总分',
-      key: 'eftScore',
-      width: 90,
-      render: (_: unknown, r: ExperimentRecordRow) =>
-        r.eft ? `${r.eft.totalScore}/10` : '-',
-    },
-    {
-      title: '认知风格',
-      key: 'cogStyle',
-      width: 100,
-      render: (_: unknown, r: ExperimentRecordRow) => {
-        if (!r.eft) return '-'
-        return r.eft.totalScore >= 7 ? (
-          <Tag color="green">场独立型</Tag>
-        ) : (
-          <Tag color="orange">场依存型</Tag>
-        )
-      },
-    },
-    {
-      title: '接管命中',
-      key: 'takeoverHits',
-      width: 90,
-      render: (_: unknown, r: ExperimentRecordRow) => {
-        if (!r.takeover) return '-'
-        const hits = r.takeover.trials.filter((t) => t.hit).length
-        return `${hits}/${r.takeover.trials.length}`
-      },
-    },
-    {
-      title: '状态',
-      key: 'status',
-      width: 100,
-      render: (_: unknown, r: ExperimentRecordRow) => {
-        if (r.disqualify_reason)
-          return <Tag color="red">{DISQUALIFY_LABELS[r.disqualify_reason] ?? '不合格'}</Tag>
-        if (r.eft && r.takeover && r.survey) return <Tag color="green">已完成</Tag>
-        return <Tag color="blue">进行中</Tag>
-      },
-    },
-  ]
+  // -------- 数据明细：展开为四个子表 --------
+  // 表1：流程一 信息采集（每位被试一行）
+  const screeningRows = useMemo(() => {
+    return records.map((r, i) => ({
+      key: `${r.id}-screen`,
+      编号: i + 1,
+      提交时间: new Date(r.created_at).toLocaleString('zh-CN'),
+      年龄: r.demographic?.age ?? '-',
+      性别: genderText(r.demographic?.gender ?? null),
+      最高学历: r.demographic?.education || '-',
+      职业类别: r.demographic?.occupation || '-',
+      是否有驾驶证: yesNoText(r.demographic?.hasLicense ?? null),
+      驾龄: r.demographic?.drivingYears || '-',
+      年均行驶里程: r.demographic?.annualMileage || '-',
+      视力状况: r.demographic?.visionStatus || '-',
+      色盲测试1答案: r.demographic?.colorBlindTest1 || '-',
+      色盲测试2答案: r.demographic?.colorBlindTest2 || '-',
+      状态: r.disqualify_reason
+        ? DISQUALIFY_LABELS[r.disqualify_reason] ?? '不合格'
+        : r.eft && r.takeover && r.survey
+          ? '已完成'
+          : '进行中',
+    }))
+  }, [records])
+
+  // 表2：流程二 图形测验逐题明细（每道题一行）
+  const eftRows = useMemo(() => {
+    const rows: Record<string, unknown>[] = []
+    records.forEach((r, ri) => {
+      r.eft?.results.forEach((q) => {
+        rows.push({
+          key: `${r.id}-eft-${q.questionIndex}`,
+          被试编号: ri + 1,
+          提交时间: new Date(r.created_at).toLocaleString('zh-CN'),
+          题号: q.questionIndex + 1,
+          选择的选项: q.selectedOption ?? '超时未答',
+          是否答对: q.isCorrect ? '正确' : '错误',
+          答题时间: q.responseTime !== null ? `${Math.round(q.responseTime)} ms` : '超时',
+        })
+      })
+    })
+    return rows
+  }, [records])
+
+  // 表3：流程三 接管测试逐次明细（每次点击一行）
+  const takeoverRows = useMemo(() => {
+    const rows: Record<string, unknown>[] = []
+    records.forEach((r, ri) => {
+      r.takeover?.trials.forEach((t, ti) => {
+        rows.push({
+          key: `${r.id}-takeover-${ti}`,
+          被试编号: ri + 1,
+          提交时间: new Date(r.created_at).toLocaleString('zh-CN'),
+          试次序号: ti + 1,
+          HMI布局: layoutText(t.layout),
+          是否命中: t.hit ? '命中' : '未命中',
+          点击反应时间: `${Math.round(t.reactionTime)} ms`,
+        })
+      })
+    })
+    return rows
+  }, [records])
+
+  // 表4：流程四 主观调研逐题明细（每个布局每个维度一行）
+  const surveyRows = useMemo(() => {
+    const rows: Record<string, unknown>[] = []
+    records.forEach((r, ri) => {
+      r.survey?.results.forEach((sr) => {
+        Object.entries(sr.ratings).forEach(([dim, val]) => {
+          rows.push({
+            key: `${r.id}-survey-${sr.layout}-${dim}`,
+            被试编号: ri + 1,
+            提交时间: new Date(r.created_at).toLocaleString('zh-CN'),
+            HMI布局: layoutText(sr.layout),
+            评分维度: TLX_LABELS[dim] ?? dim,
+            评分: val,
+          })
+        })
+      })
+    })
+    return rows
+  }, [records])
 
   // -------- 渲染 --------
   if (loading) {
@@ -242,14 +264,7 @@ function Analysis() {
   }
 
   if (error) {
-    return (
-      <Alert
-        type="error"
-        message="数据加载失败"
-        description={error}
-        showIcon
-      />
-    )
+    return <Alert type="error" message="数据加载失败" description={error} showIcon />
   }
 
   return (
@@ -303,7 +318,7 @@ function Analysis() {
                   <Col xs={12} md={6}>
                     <Card size="small">
                       <Statistic
-                        title="EFT平均总分"
+                        title="图形测验平均总分"
                         value={stats.avgEftScore ? stats.avgEftScore.toFixed(1) : '--'}
                         suffix="/ 10"
                       />
@@ -312,7 +327,7 @@ function Analysis() {
                   <Col xs={12} md={6}>
                     <Card size="small">
                       <Statistic
-                        title="EFT平均反应时"
+                        title="图形测验平均反应时"
                         value={stats.avgEftRt ? Math.round(stats.avgEftRt) : '--'}
                         suffix="ms"
                       />
@@ -337,12 +352,57 @@ function Analysis() {
               key: 'table',
               label: '数据明细',
               children: (
-                <Table
-                  size="small"
-                  columns={detailColumns}
-                  dataSource={records.map((r) => ({ ...r, key: r.id }))}
-                  pagination={{ pageSize: 20, size: 'small' }}
-                  scroll={{ x: 800 }}
+                <Tabs
+                  items={[
+                    {
+                      key: 'screening',
+                      label: '流程一：信息采集',
+                      children: (
+                        <Table
+                          size="small"
+                          dataSource={screeningRows}
+                          pagination={{ pageSize: 20, size: 'small' }}
+                          scroll={{ x: 1200 }}
+                        />
+                      ),
+                    },
+                    {
+                      key: 'eft',
+                      label: '流程二：图形测验逐题',
+                      children: (
+                        <Table
+                          size="small"
+                          dataSource={eftRows}
+                          pagination={{ pageSize: 20, size: 'small' }}
+                          scroll={{ x: 600 }}
+                        />
+                      ),
+                    },
+                    {
+                      key: 'takeover',
+                      label: '流程三：接管测试逐次',
+                      children: (
+                        <Table
+                          size="small"
+                          dataSource={takeoverRows}
+                          pagination={{ pageSize: 20, size: 'small' }}
+                          scroll={{ x: 600 }}
+                        />
+                      ),
+                    },
+                    {
+                      key: 'survey',
+                      label: '流程四：主观调研逐题',
+                      children: (
+                        <Table
+                          size="small"
+                          dataSource={surveyRows}
+                          pagination={{ pageSize: 20, size: 'small' }}
+                          scroll={{ x: 600 }}
+                        />
+                      ),
+                    },
+                  ]}
                 />
               ),
             },
@@ -356,7 +416,6 @@ function Analysis() {
                   <Empty description="暂无数据，无法生成图表" />
                 ) : (
                   <Space direction="vertical" size="large" style={{ width: '100%' }}>
-                    {/* 接管反应时对比 */}
                     {takeoverChartData.length > 0 && (
                       <Card size="small" title="各布局接管反应时对比（ms，越低越好）">
                         <G2Chart
@@ -374,7 +433,6 @@ function Analysis() {
                       </Card>
                     )}
 
-                    {/* 命中率对比 */}
                     {hitRateChartData.length > 0 && (
                       <Card size="small" title="各布局命中率对比（%，越高越好）">
                         <G2Chart
@@ -392,7 +450,6 @@ function Analysis() {
                       </Card>
                     )}
 
-                    {/* NASA-TLX 雷达图 */}
                     {tlxChartData.length > 0 && (
                       <Card size="small" title="NASA-TLX 各维度评分对比（按布局）">
                         <G2Chart
@@ -417,9 +474,8 @@ function Analysis() {
                       </Card>
                     )}
 
-                    {/* EFT 得分分布 */}
                     {eftScoreChartData.length > 0 && (
-                      <Card size="small" title="各被试 EFT 得分分布（≥7为场独立型）">
+                      <Card size="small" title="各被试图形测验得分分布（≥7为场独立型）">
                         <G2Chart
                           render={(chart: Chart) => {
                             chart
