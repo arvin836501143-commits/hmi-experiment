@@ -87,7 +87,7 @@ function ExperimentHeader({ currentStep }: ExperimentHeaderProps) {
         >
           <ExperimentOutlined style={{ fontSize: 14 }} />
           <Text style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
-            HMI 实验
+            HMI Experiment
           </Text>
         </div>
       </div>

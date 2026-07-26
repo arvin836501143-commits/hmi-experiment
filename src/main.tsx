@@ -21,6 +21,22 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           colorPrimary: '#1677ff',
           borderRadius: 12,
         },
+        components: {
+          Layout: {
+            siderBg: '#000000',
+            headerBg: '#000000',
+            bodyBg: '#141414',
+          },
+          Menu: {
+            darkItemBg: '#000000',
+            darkSubMenuItemBg: '#000000',
+            darkItemSelectedBg: 'rgba(255, 255, 255, 0.08)',
+            darkItemColor: 'rgba(255, 255, 255, 0.65)',
+            darkItemHoverColor: 'rgba(255, 255, 255, 0.85)',
+            darkItemHoverBg: 'rgba(255, 255, 255, 0.06)',
+            darkItemSelectedColor: '#ffffff',
+          },
+        },
       }}
     >
       <AntApp>
