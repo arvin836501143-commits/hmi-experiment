@@ -24,9 +24,9 @@ function G2Chart({ render, height = 320 }: G2ChartProps) {
       autoFit: true,
       height,
       paddingLeft: 50,
-      paddingRight: 20,
-      paddingTop: 20,
-      paddingBottom: 40,
+      paddingRight: 30,
+      paddingTop: 50,
+      paddingBottom: 60,
     })
 
     chart.theme({ type: 'classicDark' })
