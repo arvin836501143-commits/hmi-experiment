@@ -1,0 +1,53 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  background: #141414;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* 滚动条暗色样式 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* Card 圆角 + 内部溢出裁剪 */
+.ant-card {
+  border-radius: 12px !important;
+  overflow: hidden;
+}
+.ant-card .ant-card-body {
+  border-radius: 12px;
+}
+
+/* Result 组件内部容器圆角 */
+.ant-result-body {
+  border-radius: 12px;
+}
