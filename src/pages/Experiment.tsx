@@ -20,8 +20,42 @@ import type {
   SurveyResult,
   ExperimentRecord,
 } from '../types/experiment'
+import { supabase } from '../lib/supabase'
 
 const { Text } = Typography
+
+/**
+ * 将一条实验记录插入 Supabase experiment_records 表。
+ * jsonb 字段直接传对象即可，失败时降级写入 localStorage 兜底。
+ */
+async function saveRecordToSupabase(
+  record: ExperimentRecord,
+  disqualifyReason?: DisqualifyReason,
+): Promise<void> {
+  const { error } = await supabase.from('experiment_records').insert({
+    timestamp: record.timestamp,
+    demographic: record.demographic,
+    eft: record.eft,
+    takeover: record.takeover,
+    survey: record.survey,
+    disqualify_reason: disqualifyReason ?? null,
+  })
+
+  if (error) {
+    console.error('[Supabase] 插入失败，降级到 localStorage：', error.message)
+    try {
+      const records = JSON.parse(
+        localStorage.getItem('experiment_records') || '[]',
+      ) as ExperimentRecord[]
+      records.push(record)
+      localStorage.setItem('experiment_records', JSON.stringify(records))
+    } catch {
+      console.warn('[Supabase] localStorage 兜底也失败')
+    }
+  } else {
+    console.log('[Supabase] 实验记录已成功写入')
+  }
+}
 
 /** 不合格原因 → 提示文案 */
 const DISQUALIFY_MESSAGES: Record<string, { title: string; subTitle: string }> = {
@@ -80,15 +114,7 @@ function Experiment() {
       survey: null,
     }
     console.log('[ExperimentRecord] 被试不合格，已保存人口学数据：', record)
-    try {
-      const records = JSON.parse(
-        localStorage.getItem('experiment_records') || '[]',
-      ) as ExperimentRecord[]
-      records.push(record)
-      localStorage.setItem('experiment_records', JSON.stringify(records))
-    } catch {
-      console.warn('[ExperimentRecord] localStorage 写入失败')
-    }
+    void saveRecordToSupabase(record, reason)
 
     setPhase('disqualified')
   }
@@ -122,20 +148,8 @@ function Experiment() {
     console.log('[ExperimentRecord] 完整实验数据：', record)
     console.log('[ExperimentRecord] JSON：', JSON.stringify(record, null, 2))
 
-    // 存入 localStorage，防止页面刷新丢失，供后端集成时读取
-    try {
-      const records = JSON.parse(
-        localStorage.getItem('experiment_records') || '[]',
-      ) as ExperimentRecord[]
-      records.push(record)
-      localStorage.setItem('experiment_records', JSON.stringify(records))
-      console.log(
-        '[ExperimentRecord] 已存入 localStorage，累计记录数：',
-        records.length,
-      )
-    } catch {
-      console.warn('[ExperimentRecord] localStorage 写入失败')
-    }
+    // 写入 Supabase，失败时降级到 localStorage
+    void saveRecordToSupabase(record)
 
     setPhase('complete')
   }
