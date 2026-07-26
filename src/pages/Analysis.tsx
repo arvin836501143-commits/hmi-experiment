@@ -236,6 +236,102 @@ function Analysis() {
     ].filter((d) => d.value > 0)
   }, [records])
 
+  // 教育程度分布
+  const educationChartData = useMemo(() => {
+    const buckets: Record<string, number> = {}
+    records.forEach((r) => {
+      const v = r.demographic?.education
+      if (v) buckets[v] = (buckets[v] || 0) + 1
+    })
+    const order = ['大专', '本科', '硕士及以上']
+    return order
+      .filter((k) => buckets[k])
+      .map((k) => ({ 类别: k, 人数: buckets[k] }))
+  }, [records])
+
+  // 职业类别分布
+  const occupationChartData = useMemo(() => {
+    const buckets: Record<string, number> = {}
+    records.forEach((r) => {
+      const v = r.demographic?.occupation
+      if (v) buckets[v] = (buckets[v] || 0) + 1
+    })
+    const labelMap: Record<string, string> = {
+      在校学生: '在校学生',
+      职业驾驶员: '职业驾驶员',
+      汽车行业或HMI交互设计或人因工程相关从业人员: '汽车/HMI相关',
+      其他行业从业人员: '其他行业',
+    }
+    return Object.entries(buckets).map(([k, v]) => ({
+      类别: labelMap[k] ?? k,
+      人数: v,
+    }))
+  }, [records])
+
+  // 驾驶经验合并分布（驾驶证/驾龄 + 年均行驶里程）
+  const drivingExperienceChartData = useMemo(() => {
+    const result: { 类别: string; 维度: string; 人数: number }[] = []
+    // 驾驶证与驾龄
+    const licenseBuckets: Record<string, number> = {}
+    records.forEach((r) => {
+      const d = r.demographic
+      if (!d) return
+      if (d.hasLicense === 'no') {
+        licenseBuckets['无驾驶证'] = (licenseBuckets['无驾驶证'] || 0) + 1
+      } else if (d.hasLicense === 'yes') {
+        const dy = d.drivingYears || '未填写'
+        licenseBuckets[dy] = (licenseBuckets[dy] || 0) + 1
+      }
+    })
+    const licenseOrder = ['无驾驶证', '未满1年', '1-3年', '3-5年', '5年以上']
+    licenseOrder
+      .filter((k) => licenseBuckets[k])
+      .forEach((k) => result.push({ 类别: k, 维度: '驾驶证与驾龄', 人数: licenseBuckets[k] }))
+
+    // 年均行驶里程
+    const mileageBuckets: Record<string, number> = {}
+    records.forEach((r) => {
+      const v = r.demographic?.annualMileage
+      if (v) mileageBuckets[v] = (mileageBuckets[v] || 0) + 1
+    })
+    const mileageOrder = ['<3000公里', '3000-10000公里', '10000-20000公里', '>20000公里']
+    mileageOrder
+      .filter((k) => mileageBuckets[k])
+      .forEach((k) => result.push({ 类别: k, 维度: '年均行驶里程', 人数: mileageBuckets[k] }))
+
+    return result
+  }, [records])
+
+  // 视力状况与色觉测试合并分布
+  const visionAndColorChartData = useMemo(() => {
+    const buckets: Record<string, Record<string, number>> = {}
+    records.forEach((r) => {
+      const d = r.demographic
+      if (!d) return
+      // 视力分类
+      let vision: string
+      const v = d.visionStatus
+      if (!v) return
+      if (v.includes('正常') || v.includes('良好')) vision = '正常或矫正视力良好'
+      else vision = '视力较弱/未矫正'
+      // 色觉分类
+      const isColorBlind =
+        (d.colorBlindTest1 && d.colorBlindTest1 !== '74') ||
+        (d.colorBlindTest2 && d.colorBlindTest2 !== 'circle')
+      const color = isColorBlind ? '色盲/色弱' : '色觉正常'
+      if (!buckets[vision]) buckets[vision] = {}
+      buckets[vision][color] = (buckets[vision][color] || 0) + 1
+    })
+    // 展平成分组数据
+    const result: { 视力: string; 色觉: string; 人数: number }[] = []
+    Object.entries(buckets).forEach(([vision, colors]) => {
+      Object.entries(colors).forEach(([color, count]) => {
+        result.push({ 视力: vision, 色觉: color, 人数: count })
+      })
+    })
+    return result
+  }, [records])
+
   // 图形测验逐题正确率（用于折线/条形图）
   const eftPerQuestionChartData = useMemo(() => {
     const buckets: Record<number, { correct: number; total: number }> = {}
@@ -580,7 +676,7 @@ function Analysis() {
                                     position: 'outside',
                                   })
                                   .coordinate({ type: 'theta', outerRadius: 0.8 })
-                                  .legend('color', { position: 'bottom' })
+                                  .legend('color', { position: 'top' })
                               }}
                             />
                           ) : (
@@ -602,6 +698,109 @@ function Analysis() {
                                   .encode('color', 'range')
                                   .style({ radius: 6 })
                                   .label({ text: 'count', position: 'top' })
+                                  .axis('x', { title: '年龄区间' })
+                                  .axis('y', { title: '人数' })
+                                  .legend('color', { position: 'top' })
+                              }}
+                            />
+                          ) : (
+                            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                          )}
+                        </Col>
+                        <Col xs={24} lg={12}>
+                          <div style={{ marginBottom: 8 }}>
+                            <Text type="secondary">教育程度分布</Text>
+                          </div>
+                          {educationChartData.length > 0 ? (
+                            <G2Chart
+                              render={(chart: Chart) => {
+                                chart
+                                  .interval()
+                                  .data(educationChartData)
+                                  .encode('x', '类别')
+                                  .encode('y', '人数')
+                                  .encode('color', '类别')
+                                  .style({ radius: 6 })
+                                  .label({ text: '人数', position: 'top' })
+                                  .axis('x', { title: '教育程度' })
+                                  .axis('y', { title: '人数' })
+                                  .legend('color', { position: 'top' })
+                              }}
+                            />
+                          ) : (
+                            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                          )}
+                        </Col>
+                        <Col xs={24} lg={12}>
+                          <div style={{ marginBottom: 8 }}>
+                            <Text type="secondary">职业类别分布</Text>
+                          </div>
+                          {occupationChartData.length > 0 ? (
+                            <G2Chart
+                              render={(chart: Chart) => {
+                                chart
+                                  .interval()
+                                  .data(occupationChartData)
+                                  .encode('x', '类别')
+                                  .encode('y', '人数')
+                                  .encode('color', '类别')
+                                  .style({ radius: 6 })
+                                  .label({ text: '人数', position: 'top' })
+                                  .axis('x', { title: '职业类别' })
+                                  .axis('y', { title: '人数' })
+                                  .legend('color', { position: 'top' })
+                              }}
+                            />
+                          ) : (
+                            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                          )}
+                        </Col>
+                        <Col xs={24} lg={12}>
+                          <div style={{ marginBottom: 8 }}>
+                            <Text type="secondary">驾驶经验分布（驾驶证/驾龄与年均里程）</Text>
+                          </div>
+                          {drivingExperienceChartData.length > 0 ? (
+                            <G2Chart
+                              render={(chart: Chart) => {
+                                chart
+                                  .interval()
+                                  .data(drivingExperienceChartData)
+                                  .encode('x', '类别')
+                                  .encode('y', '人数')
+                                  .encode('color', '维度')
+                                  .encode('key', '维度')
+                                  .transform({ type: 'dodgeX' })
+                                  .style({ radius: 6 })
+                                  .label({ text: '人数', position: 'top' })
+                                  .axis('x', { title: '类别' })
+                                  .axis('y', { title: '人数' })
+                                  .legend('color', { position: 'top' })
+                              }}
+                            />
+                          ) : (
+                            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                          )}
+                        </Col>
+                        <Col xs={24} lg={12}>
+                          <div style={{ marginBottom: 8 }}>
+                            <Text type="secondary">视力状况与色觉测试</Text>
+                          </div>
+                          {visionAndColorChartData.length > 0 ? (
+                            <G2Chart
+                              render={(chart: Chart) => {
+                                chart
+                                  .interval()
+                                  .data(visionAndColorChartData)
+                                  .encode('x', '视力')
+                                  .encode('y', '人数')
+                                  .encode('color', '色觉')
+                                  .encode('key', '色觉')
+                                  .transform({ type: 'dodgeX' })
+                                  .style({ radius: 6 })
+                                  .label({ text: '人数', position: 'top' })
+                                  .axis('x', { title: '视力状况' })
+                                  .axis('y', { title: '人数' })
+                                  .legend('color', { position: 'top' })
                               }}
                             />
                           ) : (
@@ -633,7 +832,7 @@ function Analysis() {
                                     position: 'outside',
                                   })
                                   .coordinate({ type: 'theta', outerRadius: 0.8 })
-                                  .legend('color', { position: 'bottom' })
+                                  .legend('color', { position: 'top' })
                               }}
                             />
                           ) : (
@@ -655,6 +854,9 @@ function Analysis() {
                                   .encode('color', 'question')
                                   .style({ radius: 4 })
                                   .label({ text: 'accuracy', position: 'top' })
+                                  .axis('x', { title: '题号' })
+                                  .axis('y', { title: '正确率 (%)' })
+                                  .legend('color', { position: 'top' })
                                 chart
                                   .lineY(100)
                                   .style({
@@ -685,6 +887,9 @@ function Analysis() {
                                 .encode('color', 'style')
                                 .style({ radius: 4 })
                                 .label({ text: 'score', position: 'top' })
+                                .axis('x', { title: '被试' })
+                                .axis('y', { title: '得分' })
+                                .legend('color', { position: 'top' })
                               chart
                                 .lineY(7)
                                 .style({
@@ -722,6 +927,9 @@ function Analysis() {
                                   .encode('color', 'layout')
                                   .style({ radius: 6 })
                                   .label({ text: 'avgRt', position: 'top' })
+                                  .axis('x', { title: 'HMI布局' })
+                                  .axis('y', { title: '平均反应时 (ms)' })
+                                  .legend('color', { position: 'top' })
                               }}
                             />
                           ) : (
@@ -743,6 +951,9 @@ function Analysis() {
                                   .encode('color', 'layout')
                                   .style({ radius: 6 })
                                   .label({ text: 'hitRate', position: 'top' })
+                                  .axis('x', { title: 'HMI布局' })
+                                  .axis('y', { title: '命中率 (%)' })
+                                  .legend('color', { position: 'top' })
                               }}
                             />
                           ) : (
@@ -764,7 +975,7 @@ function Analysis() {
                             chart.coordinate({ type: 'polar' })
                             chart.scale('x', { type: 'point' })
                             chart.scale('y', { domain: [0, 100] })
-                            chart.legend('color', { position: 'bottom' })
+                            chart.legend('color', { position: 'top' })
                             chart
                               .line()
                               .data(tlxChartData)
@@ -802,14 +1013,11 @@ function Analysis() {
                               .encode('color', 'style')
                               .encode('shape', 'point')
                               .style({ r: 6, fillOpacity: 0.75, stroke: '#fff', strokeOpacity: 0.3 })
-                              .label({
-                                text: 'subject',
-                                position: 'top',
-                                fontSize: 10,
-                                fillOpacity: 0.7,
-                              })
+                              .label(false)
+                              .interaction('tooltip', { shared: false })
                               .axis('x', { title: '镶嵌图形测验总分（≥7为场独立型）' })
                               .axis('y', { title: '平均接管反应时 (ms)' })
+                              .legend('color', { position: 'top' })
                           }}
                         />
                       </Card>

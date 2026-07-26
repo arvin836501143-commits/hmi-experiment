@@ -23,10 +23,10 @@ function G2Chart({ render, height = 320 }: G2ChartProps) {
       container: containerRef.current,
       autoFit: true,
       height,
-      paddingLeft: 50,
+      paddingLeft: 70,
       paddingRight: 30,
-      paddingTop: 50,
-      paddingBottom: 60,
+      paddingTop: 60,
+      paddingBottom: 50,
     })
 
     chart.theme({ type: 'classicDark' })
