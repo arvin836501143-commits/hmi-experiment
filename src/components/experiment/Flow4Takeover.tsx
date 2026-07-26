@@ -21,7 +21,7 @@ interface Flow4TakeoverProps {
   onComplete: (result: TakeoverResult) => void
 }
 
-type Phase = 'instruction' | 'video' | 'countdown' | 'trial' | 'feedback' | 'result'
+type Phase = 'instruction' | 'video' | 'countdown' | 'waiting' | 'trial' | 'feedback' | 'result'
 
 /** 倒计时每个数字持续时长（毫秒） */
 const COUNTDOWN_STEP = 1000
@@ -72,9 +72,13 @@ function Flow4Takeover({ onComplete }: Flow4TakeoverProps) {
   const [countdownNum, setCountdownNum] = useState(3)
   const [lastReactionTime, setLastReactionTime] = useState<number | null>(null)
   const [lastHit, setLastHit] = useState(false)
+  /** 当前试次 HMI 图片是否已加载完成 */
+  const [imageLoaded, setImageLoaded] = useState(false)
 
   const startTimeRef = useRef(0)
   const answeredRef = useRef(false)
+  /** 图片加载完成标志（ref 版本，供异步回调同步读取） */
+  const imageLoadedRef = useRef(false)
   const audioCtxRef = useRef<AudioContext | null>(null)
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -128,9 +132,17 @@ function Flow4Takeover({ onComplete }: Flow4TakeoverProps) {
     }
   }, [])
 
-  /** 预加载 HMI 图片，确保试次开始时图片已缓存，保证计时准确 */
+  /**
+   * 预加载所有图片资源（座舱样机背景 + 全部 HMI 设计稿），
+   * 确保试次开始时图片已缓存，保证计时准确。
+   */
   useEffect(() => {
     const imgs: HTMLImageElement[] = []
+    // 座舱样机背景图
+    const cockpit = new Image()
+    cockpit.src = '/hmi/cockpit-prototype.jpg'
+    imgs.push(cockpit)
+    // 全部 HMI 设计稿
     Object.values(TAKEOVER_HMI_CONFIG).forEach((cfg) => {
       const img = new Image()
       img.src = cfg.image
@@ -141,7 +153,14 @@ function Flow4Takeover({ onComplete }: Flow4TakeoverProps) {
     }
   }, [])
 
-  /** 倒计时阶段：3 → 2 → 1 → 进入 trial */
+  /**
+   * 倒计时阶段：3 → 2 → 1 → 进入 trial
+   *
+   * 倒计时期间 CockpitContainer 与 HMI 图片已在隐藏状态下渲染，
+   * 图片加载与布局计算同步进行。倒计时结束后：
+   * - 图片已加载 → 立即进入 trial
+   * - 图片未加载 → 进入 waiting 阶段等待加载完成
+   */
   useEffect(() => {
     if (phase !== 'countdown') return
     setCountdownNum(3)
@@ -153,7 +172,7 @@ function Flow4Takeover({ onComplete }: Flow4TakeoverProps) {
           clearInterval(countdownIntervalRef.current)
           countdownIntervalRef.current = null
         }
-        setPhase('trial')
+        setPhase(imageLoadedRef.current ? 'trial' : 'waiting')
       } else {
         setCountdownNum(count)
       }
@@ -165,6 +184,20 @@ function Flow4Takeover({ onComplete }: Flow4TakeoverProps) {
       }
     }
   }, [phase])
+
+  /** 等待阶段：倒计时结束但图片尚未加载完成，显示加载指示器 */
+  useEffect(() => {
+    if (phase !== 'waiting') return
+    if (imageLoadedRef.current) {
+      setPhase('trial')
+      return
+    }
+    // 安全兜底：超过 8 秒仍未加载则强制进入试次，避免卡死
+    const fallback = setTimeout(() => {
+      setPhase('trial')
+    }, 8000)
+    return () => clearTimeout(fallback)
+  }, [phase, imageLoaded])
 
   /** 测试阶段：HMI 出现瞬间记录起始时间并播放报警声 */
   useEffect(() => {
@@ -182,6 +215,8 @@ function Flow4Takeover({ onComplete }: Flow4TakeoverProps) {
       if (trialIndex >= sequence.length - 1) {
         setPhase('result')
       } else {
+        imageLoadedRef.current = false
+        setImageLoaded(false)
         setTrialIndex((i) => i + 1)
         setPhase('countdown')
       }
@@ -205,6 +240,18 @@ function Flow4Takeover({ onComplete }: Flow4TakeoverProps) {
     }
   }, [clearTimers])
 
+  /** HMI 图片加载完成回调 */
+  const handleImageLoad = useCallback(() => {
+    imageLoadedRef.current = true
+    setImageLoaded(true)
+  }, [])
+
+  /** HMI 图片加载失败回调（同样标记为已加载，避免卡在 waiting 阶段） */
+  const handleImageError = useCallback(() => {
+    imageLoadedRef.current = true
+    setImageLoaded(true)
+  }, [])
+
   /** 结束当前试次：记录反应时与命中情况，进入反馈 */
   const handleTrialEnd = (hit: boolean) => {
     if (answeredRef.current) return
@@ -227,8 +274,10 @@ function Flow4Takeover({ onComplete }: Flow4TakeoverProps) {
     setPhase('video')
   }
 
-  /** 视频播放结束后自动进入倒计时阶段 */
+  /** 视频播放结束后自动进入倒计时阶段，并重置图片加载状态 */
   const handleVideoEnd = useCallback(() => {
+    imageLoadedRef.current = false
+    setImageLoaded(false)
     setPhase('countdown')
   }, [])
 
@@ -320,80 +369,116 @@ function Flow4Takeover({ onComplete }: Flow4TakeoverProps) {
         <VideoPlayer onEnded={handleVideoEnd} messageApi={message} />
       )}
 
-      {phase === 'countdown' && (
-        <div style={immersiveWrapStyle}>
-          <Title
-            level={1}
-            style={{ color: '#fff', fontSize: 180, lineHeight: 1, margin: 0 }}
-          >
-            {countdownNum}
-          </Title>
-        </div>
-      )}
-
-      {/* 正式测试 */}
-      {phase === 'trial' && (
+      {/* 倒计时 + 等待 + 正式测试：倒计时/等待期间隐藏渲染 CockpitContainer 进行预加载 */}
+      {(phase === 'countdown' || phase === 'waiting' || phase === 'trial') && (
         <div style={trialWrapStyle}>
-          <CockpitContainer
-            overlay={
-              <>
-                {/* 失误捕获层：覆盖整个中控屏，点击即视为未命中红色车辆 */}
-                <div
-                  onClick={() => handleTrialEnd(false)}
-                  style={{
-                    position: 'absolute',
-                    inset: 0,
-                    zIndex: 1,
-                    background: 'transparent',
-                    cursor: 'default',
-                  }}
-                />
-                {/* 不可见热区：覆盖红色车辆，点击视为命中 */}
-                <div
-                  onClick={() => handleTrialEnd(true)}
-                  style={{
-                    position: 'absolute',
-                    left: `${hotspotPct.left}%`,
-                    top: `${hotspotPct.top}%`,
-                    width: `${hotspotPct.width}%`,
-                    height: `${hotspotPct.height}%`,
-                    zIndex: 2,
-                    background: 'transparent',
-                    border: 'none',
-                    cursor: 'default',
-                  }}
-                />
-              </>
-            }
-          >
-            <img
-              src={currentConfig.image}
-              alt="HMI 界面"
-              draggable={false}
-              style={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'fill',
-                display: 'block',
-                userSelect: 'none',
-              }}
-            />
-          </CockpitContainer>
-
-          {/* 试次编号（不拦截点击） */}
+          {/* 座舱样机 + HMI 界面（倒计时/等待期间隐藏，仅预加载） */}
           <div
             style={{
-              position: 'absolute',
-              top: 24,
-              right: 32,
-              zIndex: 10,
-              color: 'rgba(255, 255, 255, 0.85)',
-              fontSize: 18,
-              pointerEvents: 'none',
+              width: '100%',
+              height: '100%',
+              visibility: phase === 'trial' ? 'visible' : 'hidden',
             }}
           >
-            第 {trialIndex + 1} / {sequence.length} 轮
+            <CockpitContainer
+              overlay={
+                <>
+                  {/* 失误捕获层：覆盖整个中控屏，点击即视为未命中红色车辆 */}
+                  <div
+                    onClick={() => phase === 'trial' && handleTrialEnd(false)}
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      zIndex: 1,
+                      background: 'transparent',
+                      cursor: 'default',
+                    }}
+                  />
+                  {/* 不可见热区：覆盖红色车辆，点击视为命中 */}
+                  <div
+                    onClick={() => phase === 'trial' && handleTrialEnd(true)}
+                    style={{
+                      position: 'absolute',
+                      left: `${hotspotPct.left}%`,
+                      top: `${hotspotPct.top}%`,
+                      width: `${hotspotPct.width}%`,
+                      height: `${hotspotPct.height}%`,
+                      zIndex: 2,
+                      background: 'transparent',
+                      border: 'none',
+                      cursor: 'default',
+                    }}
+                  />
+                </>
+              }
+            >
+              <img
+                src={currentConfig.image}
+                alt="HMI 界面"
+                draggable={false}
+                onLoad={handleImageLoad}
+                onError={handleImageError}
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'fill',
+                  display: 'block',
+                  userSelect: 'none',
+                }}
+              />
+            </CockpitContainer>
           </div>
+
+          {/* 倒计时数字遮罩 */}
+          {phase === 'countdown' && (
+            <div style={{ ...immersiveWrapStyle, zIndex: 10 }}>
+              <Title
+                level={1}
+                style={{ color: '#fff', fontSize: 180, lineHeight: 1, margin: 0 }}
+              >
+                {countdownNum}
+              </Title>
+            </div>
+          )}
+
+          {/* 加载等待遮罩 */}
+          {phase === 'waiting' && (
+            <div
+              style={{
+                ...immersiveWrapStyle,
+                zIndex: 10,
+                flexDirection: 'column',
+              }}
+            >
+              <Spin size="large" />
+              <Text
+                style={{
+                  color: 'rgba(255,255,255,0.65)',
+                  marginTop: 16,
+                  fontSize: 16,
+                }}
+              >
+                正在加载测试界面...
+              </Text>
+            </div>
+          )}
+
+          {/* 试次编号（不拦截点击） */}
+          {phase === 'trial' && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 24,
+                right: 32,
+                zIndex: 10,
+                color: 'rgba(255, 255, 255, 0.85)',
+                fontSize: 18,
+                pointerEvents: 'none',
+              }}
+            >
+              第 {trialIndex + 1} / {sequence.length} 轮
+            </div>
+          )}
         </div>
       )}
 
