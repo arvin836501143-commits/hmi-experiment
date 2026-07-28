@@ -42,10 +42,10 @@ const TLX_DIMENSIONS: TLXDimConfig[] = [
     enName: 'Mental Demand',
     icon: '🧠',
     question: '获取该布局信息、搜寻目标并做出识别时，您的思考、计算和决策负荷如何？',
-    leftLabel: '极其繁重，极其烧脑',
-    rightLabel: '极其轻松，无需动脑',
-    leftEmoji: '😫',
-    rightEmoji: '😊',
+    leftLabel: '极其轻松，无需动脑',
+    rightLabel: '极其繁重，极其烧脑',
+    leftEmoji: '😊',
+    rightEmoji: '😫',
     reverseScored: false,
   },
   {
@@ -55,10 +55,10 @@ const TLX_DIMENSIONS: TLXDimConfig[] = [
     icon: '🦾',
     question:
       '在进行视线偏置扫视以及操控鼠标/触控板点击时，您感受到的身体动作负荷如何？',
-    leftLabel: '极其繁重，身体疲累',
-    rightLabel: '极其轻松，毫不费力',
-    leftEmoji: '😫',
-    rightEmoji: '😊',
+    leftLabel: '极其轻松，毫不费力',
+    rightLabel: '极其繁重，身体疲累',
+    leftEmoji: '😊',
+    rightEmoji: '😫',
     reverseScored: false,
   },
   {
@@ -68,10 +68,10 @@ const TLX_DIMENSIONS: TLXDimConfig[] = [
     icon: '⏱️',
     question:
       '在看到预警信号时，当前界面布局是否导致您需要仓促做出判断，从而产生了强烈的时间压迫感与应变仓促感？',
-    leftLabel: '布局慌乱，极度仓促',
-    rightLabel: '布局清晰，从容有裕',
-    leftEmoji: '😫',
-    rightEmoji: '😊',
+    leftLabel: '布局清晰，从容有裕',
+    rightLabel: '布局慌乱，极度仓促',
+    leftEmoji: '😊',
+    rightEmoji: '😫',
     reverseScored: false,
   },
   {
@@ -85,7 +85,7 @@ const TLX_DIMENSIONS: TLXDimConfig[] = [
     rightLabel: '极度满意，表现完美',
     leftEmoji: '😫',
     rightEmoji: '😊',
-    reverseScored: false,
+    reverseScored: true,
   },
   {
     key: 'effort',
@@ -94,10 +94,10 @@ const TLX_DIMENSIONS: TLXDimConfig[] = [
     icon: '💦',
     question:
       '为了成功命中红车危险热区，您必须调动全神贯注精神资源的艰苦程度如何？',
-    leftLabel: '竭尽全力，高度紧张',
-    rightLabel: '毫不费力，轻松完成',
-    leftEmoji: '😫',
-    rightEmoji: '😊',
+    leftLabel: '毫不费力，轻松完成',
+    rightLabel: '竭尽全力，高度紧张',
+    leftEmoji: '😊',
+    rightEmoji: '😫',
     reverseScored: false,
   },
   {
@@ -107,10 +107,10 @@ const TLX_DIMENSIONS: TLXDimConfig[] = [
     icon: '😣',
     question:
       '在面对刚刚那一套界面布局时，您内心是否产生了焦躁、困惑、无力或不安全等消极情绪？',
-    leftLabel: '极度挫败，非常焦躁',
-    rightLabel: '极其笃定，毫无挫败',
-    leftEmoji: '😫',
-    rightEmoji: '😊',
+    leftLabel: '极其笃定，毫无挫败',
+    rightLabel: '极度挫败，非常焦躁',
+    leftEmoji: '😊',
+    rightEmoji: '😫',
     reverseScored: false,
   },
 ]
@@ -261,9 +261,18 @@ function Flow5Survey({ onComplete }: Flow5SurveyProps) {
 
   const handleCompleteLayout = () => {
     if (!allAnswered) return
+    // 对反向计分维度（作业绩效）进行转换：
+    // 滑块原始值 X = 被试满意度（0=极不满意, 100=极度满意），
+    // 存储的工作负荷得分 = 100 - X（满意度越高 → 负荷越低）。
+    const processedRatings = { ...ratings } as Record<TLXDimension, number>
+    TLX_DIMENSIONS.forEach((dim) => {
+      if (dim.reverseScored) {
+        processedRatings[dim.key] = 100 - processedRatings[dim.key]
+      }
+    })
     const layoutResult: SurveyLayoutResult = {
       layout: currentLayout,
-      ratings: ratings as Record<TLXDimension, number>,
+      ratings: processedRatings,
     }
     const newResults = [...results, layoutResult]
     setResults(newResults)
